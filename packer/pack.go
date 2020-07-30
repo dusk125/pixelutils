@@ -2,52 +2,74 @@ package packer
 
 import (
 	"fmt"
+	"log"
 	"sort"
+
+	"github.com/faiface/pixel/pixelgl"
 
 	"golang.org/x/image/colornames"
 
+	"github.com/dusk125/pixelutils"
 	"github.com/faiface/pixel/imdraw"
-	"github.com/faiface/pixel/pixelgl"
 
 	"github.com/faiface/pixel"
 )
 
 type Packer struct {
-	emptySpaces  []pixel.Rect
-	filledSpaces []pixel.Rect
-	canvas       *pixelgl.Canvas
+	bounds       pixel.Rect
+	emptySpaces  spaceList
+	filledSpaces spaceList
+	pic          *pixel.PictureData
 	flags        uint8
 	im           *imdraw.IMDraw
+	images       map[int]pixel.Rect
+	id           *pixelutils.IDGen
+	dirty        bool
+	glpic        pixelgl.GLPicture
+
+	// TODO remove; debug stuff
+	sprite *pixel.Sprite
 }
+
+type spaceList []pixel.Rect
+
+func (s spaceList) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s spaceList) Len() int           { return len(s) }
+func (s spaceList) Less(i, j int) bool { return s[i].Area() < s[j].Area() }
 
 const (
 	PackerAllowGrowth uint8 = 1 << iota
 	PackerDebugDraw
+	PackerDefragOnInsert
+)
+
+const (
+	InsertFlipped uint8 = 1 << iota
 )
 
 func NewPacker(width, height int, flags uint8) *Packer {
 	packer := &Packer{
-		flags: flags,
+		bounds: pixel.R(0, 0, float64(width), float64(height)),
+		flags:  flags,
+		id:     pixelutils.NewIDGen(),
 	}
 
-	packer.canvas = pixelgl.NewCanvas(pixel.R(0, 0, float64(width), float64(height)))
+	packer.pic = pixel.MakePictureData(packer.bounds)
 
 	if packer.hasFlag(PackerDebugDraw) {
 		packer.im = imdraw.New(nil)
 		packer.im.Color = colornames.Red
-		packer.im.Push(packer.canvas.Bounds().Min, packer.canvas.Bounds().Max)
+		packer.im.Push(packer.bounds.Min, packer.bounds.Max)
 		packer.im.Rectangle(5)
 	}
 
-	packer.emptySpaces = make([]pixel.Rect, 1)
-	packer.emptySpaces[0] = packer.canvas.Bounds()
-	packer.filledSpaces = make([]pixel.Rect, 0)
+	packer.emptySpaces = make(spaceList, 1)
+	packer.emptySpaces[0] = packer.bounds
+	packer.filledSpaces = make(spaceList, 0)
+
+	packer.images = make(map[int]pixel.Rect)
 
 	return packer
-}
-
-func (packer *Packer) MakeTriangles(t pixel.Triangles) pixel.TargetTriangles {
-	return packer.canvas.MakeTriangles(t)
 }
 
 func (packer *Packer) remove(i int) (removed pixel.Rect) {
@@ -60,11 +82,27 @@ func (packer Packer) hasFlag(flag uint8) bool {
 	return packer.flags&flag != 0
 }
 
-func (packer *Packer) Insert(image *pixel.Sprite) (pos pixel.Vec, err error) {
+func (packer *Packer) Defrag() {
+	spaces := make(spaceList, len(packer.filledSpaces))
+	copy(spaces, packer.filledSpaces)
+	sort.Sort(sort.Reverse(spaces))
+
+	packer.emptySpaces = packer.emptySpaces[:0]
+	packer.filledSpaces = packer.filledSpaces[:0]
+	packer.emptySpaces = append(packer.emptySpaces, packer.bounds)
+
+	for _, space := range spaces {
+		bounds := pixel.R(0, 0, space.W(), space.H())
+		if _, _, err := packer.insert(bounds); err != nil {
+			log.Fatalln(err)
+		}
+	}
+}
+
+func (packer *Packer) insert(bounds pixel.Rect) (space pixel.Rect, id int, err error) {
 	candidateIndex := 0
 	if len(packer.emptySpaces) > 1 {
 		found := false
-		bounds := image.Picture().Bounds()
 		for i, space := range packer.emptySpaces {
 			if bounds.W() <= space.W() && bounds.H() <= space.H() {
 				candidateIndex = i
@@ -74,17 +112,17 @@ func (packer *Packer) Insert(image *pixel.Sprite) (pos pixel.Vec, err error) {
 		}
 
 		if !found {
-			return pixel.ZV, fmt.Errorf("Couldn't find an empty space")
+			return pixel.ZR, -1, fmt.Errorf("Couldn't find an empty space")
 		}
 	}
 
-	space := packer.remove(candidateIndex)
+	space = packer.remove(candidateIndex)
 	packer.filledSpaces = append(packer.filledSpaces, space)
 
-	s := packer.split(image.Picture().Bounds(), space)
+	s := packer.split(bounds, space)
 
 	if s.count == -1 {
-		return pixel.ZV, fmt.Errorf("Failed to split the space")
+		return pixel.ZR, -1, fmt.Errorf("Failed to split the space")
 	}
 
 	if s.count == 2 {
@@ -92,7 +130,7 @@ func (packer *Packer) Insert(image *pixel.Sprite) (pos pixel.Vec, err error) {
 	}
 	packer.emptySpaces = append(packer.emptySpaces, s.smaller)
 
-	sort.Sort(spaceSorter{packer.emptySpaces})
+	sort.Sort(packer.emptySpaces)
 
 	if packer.hasFlag(PackerDebugDraw) {
 		packer.im.Reset()
@@ -110,17 +148,69 @@ func (packer *Packer) Insert(image *pixel.Sprite) (pos pixel.Vec, err error) {
 		}
 	}
 
-	image.Draw(packer.canvas, pixel.IM.Moved(space.Min).Moved(image.Picture().Bounds().Center()))
+	id = packer.id.Gen()
+	packer.images[id] = rect(space.Min.X, space.Min.Y, bounds.W(), bounds.H())
 
-	return space.Min, nil
+	return space, id, nil
+}
+
+func (packer *Packer) Insert(image *pixel.Sprite) (id int, err error) {
+	return packer.InsertV(image, 0)
+}
+
+func (packer *Packer) InsertV(image *pixel.Sprite, flags uint8) (id int, err error) {
+	bounds := image.Picture().Bounds()
+	pic := image.Picture().(*pixel.PictureData)
+
+	var space pixel.Rect
+	if space, id, err = packer.insert(bounds); err != nil {
+		return -1, err
+	}
+
+	for y := 0; y < int(pic.Bounds().H()); y++ {
+		for x := 0; x < int(pic.Bounds().W()); x++ {
+			i := packer.pic.Index(pixel.V(space.Min.X+float64(x), space.Min.Y+float64(y)))
+			var ii int
+			if flags&InsertFlipped != 0 {
+				ii = pic.Index(pixel.V(float64(x), (pic.Bounds().H()-1)-float64(y)))
+			} else {
+				ii = pic.Index(pixel.V(float64(x), float64(y)))
+			}
+			packer.pic.Pix[i] = pic.Pix[ii]
+		}
+	}
+
+	packer.dirty = true
+
+	return id, nil
+}
+
+func (packer Packer) BoundsOf(id int) pixel.Rect {
+	return packer.images[id]
 }
 
 func (packer Packer) Center() pixel.Vec {
-	return packer.canvas.Bounds().Center()
+	return packer.Bounds().Center()
 }
 
-func (packer Packer) Draw(t pixel.Target, matrix pixel.Matrix) {
-	packer.canvas.Draw(t, matrix)
+func (packer Packer) Bounds() pixel.Rect {
+	return packer.bounds
+}
+
+func (packer *Packer) Picture() pixel.Picture {
+	if packer.dirty {
+		packer.glpic = pixelgl.NewGLPicture(packer.pic)
+		packer.dirty = false
+	}
+	return packer.glpic
+}
+
+func (packer *Packer) Draw(t pixel.Target, matrix pixel.Matrix) {
+	if packer.sprite == nil {
+		packer.sprite = pixel.NewSprite(packer.Picture(), packer.Picture().Bounds())
+	}
+
+	packer.sprite.Draw(t, matrix)
 
 	if packer.hasFlag(PackerDebugDraw) {
 		packer.im.Draw(t)
@@ -183,20 +273,4 @@ func splits(rects ...pixel.Rect) (s *createdSplits) {
 	}
 
 	return
-}
-
-type spaceSorter struct {
-	spaces []pixel.Rect
-}
-
-func (sorter spaceSorter) Swap(i, j int) {
-	sorter.spaces[i], sorter.spaces[j] = sorter.spaces[j], sorter.spaces[i]
-}
-
-func (sorter spaceSorter) Len() int {
-	return len(sorter.spaces)
-}
-
-func (sorter spaceSorter) Less(i, j int) bool {
-	return sorter.spaces[i].Area() < sorter.spaces[j].Area()
 }
