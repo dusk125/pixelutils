@@ -14,6 +14,7 @@ type Ticker struct {
 	totalFrames    int64
 	totalFrametime float64
 	avgFramerate   float64
+	storePrev      bool
 	prevFPS        []float32
 	prevFPSOffset  int
 }
@@ -22,58 +23,72 @@ const (
 	MAX_PREV_FPS = 500
 )
 
+// NewTicker returns a new ticker with the given target fps and 500 stored previous framerates.
 func NewTicker(targetFPS int64) *Ticker {
+	return NewTickerV(targetFPS, MAX_PREV_FPS)
+}
+
+// NewTickerV returns a new ticker with the given target fps and a custom amount of stored previous framerates.
+// 	If maxPrevFPS is <= 0, don't store any previous framerates.
+func NewTickerV(targetFPS, maxPrevFPS int64) *Ticker {
 	ticker := &Ticker{
 		last: time.Now(),
 	}
 
 	ticker.SetTargetFPS(targetFPS)
-	ticker.prevFPS = make([]float32, MAX_PREV_FPS)
+	ticker.storePrev = maxPrevFPS != 0
+	if ticker.storePrev {
+		ticker.prevFPS = make([]float32, maxPrevFPS)
+	}
 
 	return ticker
 }
 
-func (this *Ticker) SetTargetFPS(target int64) {
-	this.targetFrametime = time.Second / time.Duration(target)
-	this.targetFPS = time.NewTicker(this.targetFrametime)
+// SetTargetFPS sets the target ticker rate; will be less than or equal to target.
+func (ticker *Ticker) SetTargetFPS(target int64) {
+	ticker.targetFrametime = time.Second / time.Duration(target)
+	if ticker.targetFPS != nil {
+		ticker.targetFPS.Stop()
+	}
+	ticker.targetFPS = time.NewTicker(ticker.targetFrametime)
 }
 
-func (this *Ticker) Tick() (deltat, framerate float64) {
-	this.deltat = time.Since(this.last).Seconds()
-	this.last = time.Now()
+// Tick ticks the tickers and calculates the framerate and framedelta
+func (ticker *Ticker) Tick() (deltat, framerate float64) {
+	ticker.deltat = time.Since(ticker.last).Seconds()
+	ticker.last = time.Now()
 
-	if this.frametime >= 1 {
-		this.totalFrames += int64(this.frames)
-		this.totalFrametime += this.frametime
+	if ticker.frametime >= 1 {
+		ticker.totalFrames += int64(ticker.frames)
+		ticker.totalFrametime += ticker.frametime
 
-		this.frametime = 0
-		this.frames = 0
+		ticker.frametime = 0
+		ticker.frames = 0
 	} else {
-		this.frames++
-		this.frametime += this.deltat
+		ticker.frames++
+		ticker.frametime += ticker.deltat
 	}
 
-	if this.frametime == 0 {
-		this.avgFramerate = float64(this.totalFrames) / this.totalFrametime
-		this.framerate = this.avgFramerate
+	if ticker.frametime == 0 {
+		ticker.avgFramerate = float64(ticker.totalFrames) / ticker.totalFrametime
+		ticker.framerate = ticker.avgFramerate
 	} else {
-		this.framerate = float64(this.frames) / this.frametime
+		ticker.framerate = float64(ticker.frames) / ticker.frametime
 	}
 
-	if this.prevFPSOffset == MAX_PREV_FPS {
-		this.prevFPSOffset = 0
+	if ticker.storePrev {
+		if ticker.prevFPSOffset == MAX_PREV_FPS {
+			ticker.prevFPSOffset = 0
+		}
+
+		ticker.prevFPS[ticker.prevFPSOffset] = float32(ticker.framerate)
+		ticker.prevFPSOffset++
 	}
 
-	this.prevFPS[this.prevFPSOffset] = float32(this.framerate)
-	this.prevFPSOffset++
-
-	return this.deltat, this.framerate
+	return ticker.deltat, ticker.framerate
 }
 
-func (this *Ticker) Reset() {
-	this.last = time.Now()
-}
-
-func (this *Ticker) Wait() {
-	<-this.targetFPS.C
+// Wait for the timer to complete its timeout
+func (ticker *Ticker) Wait() {
+	<-ticker.targetFPS.C
 }

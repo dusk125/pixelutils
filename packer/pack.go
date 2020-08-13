@@ -5,48 +5,44 @@ import (
 	"log"
 	"sort"
 
+	"github.com/dusk125/pixelutils"
+
 	"github.com/faiface/pixel/pixelgl"
 
 	"golang.org/x/image/colornames"
 
-	"github.com/dusk125/pixelutils"
 	"github.com/faiface/pixel/imdraw"
 
 	"github.com/faiface/pixel"
 )
 
-type Packer struct {
-	bounds       pixel.Rect
-	emptySpaces  spaceList
-	filledSpaces spaceList
-	pic          *pixel.PictureData
-	flags        uint8
-	im           *imdraw.IMDraw
-	images       map[int]pixel.Rect
-	id           *pixelutils.IDGen
-	dirty        bool
-	glpic        pixelgl.GLPicture
+// This texture packer algorithm is based on this project
+// https://github.com/TeamHypersomnia/rectpack2D
 
-	// TODO remove; debug stuff
-	sprite *pixel.Sprite
+type Packer struct {
+	bounds      pixel.Rect
+	emptySpaces spaceList
+	pic         *pixel.PictureData
+	flags       uint8
+	im          *imdraw.IMDraw
+	images      map[int]pixel.Rect
+	dirty       bool
+	glpic       pixelgl.GLPicture
+	sprite      *pixel.Sprite
+	id          *pixelutils.IDGen
 }
 
-type spaceList []pixel.Rect
-
-func (s spaceList) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-func (s spaceList) Len() int           { return len(s) }
-func (s spaceList) Less(i, j int) bool { return s[i].Area() < s[j].Area() }
-
 const (
-	PackerAllowGrowth uint8 = 1 << iota
-	PackerDebugDraw
-	PackerDefragOnInsert
+	AllowGrowth      uint8 = 1 << iota // Should the packer space try to grow larger to fit oversized images
+	DebugDraw                          // Show the lines of the empty spaces when drawing the texture as an entire sprite
+	OptimizeOnInsert                   // When a new image is inserted, defragment the texture space
 )
 
 const (
-	InsertFlipped uint8 = 1 << iota
+	InsertFlipped uint8 = 1 << iota // Flip the sprite upside-down on insert
 )
 
+// NewPacker creates and returns a new texture packer
 func NewPacker(width, height int, flags uint8) *Packer {
 	packer := &Packer{
 		bounds: pixel.R(0, 0, float64(width), float64(height)),
@@ -56,7 +52,7 @@ func NewPacker(width, height int, flags uint8) *Packer {
 
 	packer.pic = pixel.MakePictureData(packer.bounds)
 
-	if packer.hasFlag(PackerDebugDraw) {
+	if packer.hasFlag(DebugDraw) {
 		packer.im = imdraw.New(nil)
 		packer.im.Color = colornames.Red
 		packer.im.Push(packer.bounds.Min, packer.bounds.Max)
@@ -65,64 +61,122 @@ func NewPacker(width, height int, flags uint8) *Packer {
 
 	packer.emptySpaces = make(spaceList, 1)
 	packer.emptySpaces[0] = packer.bounds
-	packer.filledSpaces = make(spaceList, 0)
 
 	packer.images = make(map[int]pixel.Rect)
 
 	return packer
 }
 
+// remove removes the given image
 func (packer *Packer) remove(i int) (removed pixel.Rect) {
 	removed = packer.emptySpaces[i]
 	packer.emptySpaces = append(packer.emptySpaces[:i], packer.emptySpaces[i+1:]...)
 	return
 }
 
+// hasFlag is a helper to test bit flags
 func (packer Packer) hasFlag(flag uint8) bool {
 	return packer.flags&flag != 0
 }
 
-func (packer *Packer) Defrag() {
-	spaces := make(spaceList, len(packer.filledSpaces))
-	copy(spaces, packer.filledSpaces)
-	sort.Sort(sort.Reverse(spaces))
+// Returns a copy of the sprite with the given ID
+func (packer Packer) SpriteFrom(id int) *pixel.Sprite {
+	subImage := packer.images[id]
+	image := subImage.Moved(subImage.Min.Scaled(-1))
+	pic := pixel.MakePictureData(image)
 
+	for y := 0; y < int(image.H()); y++ {
+		for x := 0; x < int(image.W()); x++ {
+			v := pixel.V(float64(x), float64(y))
+			pic.Pix[pic.Index(v)] = packer.pic.Pix[packer.pic.Index(v.Add(subImage.Min))]
+		}
+	}
+
+	return pixel.NewSprite(pic, pic.Bounds())
+}
+
+// Grows the packer space by the given amount
+func (packer *Packer) grow(growSize pixel.Vec) {
+	packer.bounds = rect(0, 0, packer.bounds.W()+growSize.X, packer.bounds.H()+growSize.Y)
+	packer.reinsert(false)
+}
+
+// Aids in optimizing and growing the texture space
+func (packer *Packer) reinsert(optimze bool) {
+	// Pull out of the sprites from the atlas
+	sprites := make(spriteList, 0)
+	for id := range packer.images {
+		sprite := packer.SpriteFrom(id)
+		sprites = append(sprites, idSprite{id: id, sprite: sprite})
+	}
+
+	if optimze {
+		// Sort them largest to smallest
+		sort.Sort(sort.Reverse(sprites))
+	}
+
+	// Clear out atlas and metadata
 	packer.emptySpaces = packer.emptySpaces[:0]
-	packer.filledSpaces = packer.filledSpaces[:0]
 	packer.emptySpaces = append(packer.emptySpaces, packer.bounds)
+	packer.pic = pixel.MakePictureData(packer.bounds)
+	packer.makeDirty()
 
-	for _, space := range spaces {
-		bounds := pixel.R(0, 0, space.W(), space.H())
-		if _, _, err := packer.insert(bounds); err != nil {
+	// Re-insert sprites
+	for _, cont := range sprites {
+		if err := packer.Insert(cont.id, cont.sprite); err != nil {
 			log.Fatalln(err)
 		}
 	}
 }
 
-func (packer *Packer) insert(bounds pixel.Rect) (space pixel.Rect, id int, err error) {
-	candidateIndex := 0
-	if len(packer.emptySpaces) > 1 {
-		found := false
-		for i, space := range packer.emptySpaces {
-			if bounds.W() <= space.W() && bounds.H() <= space.H() {
-				candidateIndex = i
-				found = true
-				break
-			}
+// Defragments the texture space to try and minimize wasted space
+func (packer *Packer) Optimize() {
+	packer.reinsert(true)
+}
+
+// Replaces replaces the given id with the new sprite (optimizing the atlas).
+//	If the id doesn't exist in the atlas, this acts like a normal insert with optimization.
+func (packer *Packer) Replace(id int, sprite *pixel.Sprite) (err error) {
+	delete(packer.images, id)
+
+	return packer.InsertV(id, sprite, OptimizeOnInsert)
+}
+
+// Looks for a space that can hold the given image bounds
+func (packer *Packer) find(bounds pixel.Rect) (candidateIndex int, found bool) {
+	for i, space := range packer.emptySpaces {
+		if bounds.W() <= space.W() && bounds.H() <= space.H() {
+			candidateIndex = i
+			found = true
+			return
+		}
+	}
+
+	return -1, false
+}
+
+// Helper for actually inserting and splitting the image bounds
+func (packer *Packer) insert(bounds pixel.Rect, id int) (space pixel.Rect, err error) {
+	candidateIndex, found := packer.find(bounds)
+
+	if !found {
+		if !packer.hasFlag(AllowGrowth) {
+			return pixel.ZR, fmt.Errorf("Couldn't find an empty space")
 		}
 
+		packer.grow(bounds.Size())
+		candidateIndex, found = packer.find(bounds)
 		if !found {
-			return pixel.ZR, -1, fmt.Errorf("Couldn't find an empty space")
+			return pixel.ZR, fmt.Errorf("Failed to find space after growth")
 		}
 	}
 
 	space = packer.remove(candidateIndex)
-	packer.filledSpaces = append(packer.filledSpaces, space)
 
 	s := packer.split(bounds, space)
 
 	if s.count == -1 {
-		return pixel.ZR, -1, fmt.Errorf("Failed to split the space")
+		return pixel.ZR, fmt.Errorf("Failed to split the space")
 	}
 
 	if s.count == 2 {
@@ -132,15 +186,10 @@ func (packer *Packer) insert(bounds pixel.Rect) (space pixel.Rect, id int, err e
 
 	sort.Sort(packer.emptySpaces)
 
-	if packer.hasFlag(PackerDebugDraw) {
+	if packer.hasFlag(DebugDraw) {
 		packer.im.Reset()
 		packer.im.Clear()
 
-		packer.im.Color = colornames.Black
-		for _, item := range packer.filledSpaces {
-			packer.im.Push(item.Min, item.Max)
-			packer.im.Rectangle(5)
-		}
 		packer.im.Color = colornames.Red
 		for _, item := range packer.emptySpaces {
 			packer.im.Push(item.Min, item.Max)
@@ -148,23 +197,33 @@ func (packer *Packer) insert(bounds pixel.Rect) (space pixel.Rect, id int, err e
 		}
 	}
 
-	id = packer.id.Gen()
 	packer.images[id] = rect(space.Min.X, space.Min.Y, bounds.W(), bounds.H())
 
-	return space, id, nil
+	return space, nil
 }
 
-func (packer *Packer) Insert(image *pixel.Sprite) (id int, err error) {
-	return packer.InsertV(image, 0)
+// External helper that generates a unique (to this packer instance) texture ID
+func (packer *Packer) GenerateId() int {
+	return packer.id.Gen()
 }
 
-func (packer *Packer) InsertV(image *pixel.Sprite, flags uint8) (id int, err error) {
+// Inserts the image with the given id into the texture space; default values.
+func (packer *Packer) Insert(id int, image *pixel.Sprite) (err error) {
+	return packer.InsertV(id, image, 0)
+}
+
+// Inserts the image with the given id and additional insertion flags.
+func (packer *Packer) InsertV(id int, image *pixel.Sprite, flags uint8) (err error) {
 	bounds := image.Picture().Bounds()
 	pic := image.Picture().(*pixel.PictureData)
 
+	if flags&OptimizeOnInsert != 0 {
+		packer.Optimize()
+	}
+
 	var space pixel.Rect
-	if space, id, err = packer.insert(bounds); err != nil {
-		return -1, err
+	if space, err = packer.insert(bounds, id); err != nil {
+		return err
 	}
 
 	for y := 0; y < int(pic.Bounds().H()); y++ {
@@ -180,23 +239,33 @@ func (packer *Packer) InsertV(image *pixel.Sprite, flags uint8) (id int, err err
 		}
 	}
 
-	packer.dirty = true
+	packer.makeDirty()
 
-	return id, nil
+	return nil
 }
 
+// Helper to invalidate the internal texture
+func (packer *Packer) makeDirty() {
+	packer.dirty = true
+	packer.sprite = nil
+}
+
+// Returns the bounds of the given texture id
 func (packer Packer) BoundsOf(id int) pixel.Rect {
 	return packer.images[id]
 }
 
+// Returns the center location of the packer's internal texture
 func (packer Packer) Center() pixel.Vec {
 	return packer.Bounds().Center()
 }
 
+// Returns the bounds of the packer's internal texture
 func (packer Packer) Bounds() pixel.Rect {
 	return packer.bounds
 }
 
+// Generates and returns a picture data representation of the internal texture
 func (packer *Packer) Picture() pixel.Picture {
 	if packer.dirty {
 		packer.glpic = pixelgl.NewGLPicture(packer.pic)
@@ -205,6 +274,7 @@ func (packer *Packer) Picture() pixel.Picture {
 	return packer.glpic
 }
 
+// Draws the internal texture as a sprite; recommended for debug only
 func (packer *Packer) Draw(t pixel.Target, matrix pixel.Matrix) {
 	if packer.sprite == nil {
 		packer.sprite = pixel.NewSprite(packer.Picture(), packer.Picture().Bounds())
@@ -212,15 +282,17 @@ func (packer *Packer) Draw(t pixel.Target, matrix pixel.Matrix) {
 
 	packer.sprite.Draw(t, matrix)
 
-	if packer.hasFlag(PackerDebugDraw) {
+	if packer.hasFlag(DebugDraw) {
 		packer.im.Draw(t)
 	}
 }
 
+// Helper to create a rectangle with x,y,w,h instead of x1,y1,x2,y2
 func rect(x, y, w, h float64) pixel.Rect {
 	return pixel.R(x, y, x+w, y+h)
 }
 
+// Returns the post-insert spaces of leftover space; if any
 func (packer *Packer) split(image, space pixel.Rect) *createdSplits {
 	w := space.W() - image.W()
 	h := space.H() - image.H()
@@ -241,36 +313,12 @@ func (packer *Packer) split(image, space pixel.Rect) *createdSplits {
 
 	var smaller, larger pixel.Rect
 	if w > h {
-		smaller = rect(space.Min.X+image.W(), space.Min.Y, w, image.H())
-		larger = rect(space.Min.X, space.Min.Y+image.H(), image.W(), h)
-	} else {
 		smaller = rect(space.Min.X, space.Min.Y+image.H(), image.W(), h)
 		larger = rect(space.Min.X+image.W(), space.Min.Y, w, space.H())
+	} else {
+		smaller = rect(space.Min.X+image.W(), space.Min.Y, w, image.H())
+		larger = rect(space.Min.X, space.Min.Y+image.H(), space.W(), h)
 	}
 
 	return splits(smaller, larger)
-}
-
-type createdSplits struct {
-	count           int
-	smaller, bigger pixel.Rect
-}
-
-func splitsFailed() *createdSplits {
-	return &createdSplits{
-		count: -1,
-	}
-}
-
-func splits(rects ...pixel.Rect) (s *createdSplits) {
-	s = &createdSplits{
-		count:   len(rects),
-		smaller: rects[0],
-	}
-
-	if s.count == 2 {
-		s.bigger = rects[1]
-	}
-
-	return
 }
