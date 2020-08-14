@@ -12,3 +12,6 @@ A collection of random things I think could be useful for those using the [Pixel
 ## Planned
 * [Voronoi Diagrams](https://github.com/pzsz/voronoi)
 * [AStar Pathfinding](https://github.com/fzipp/astar)
+
+## Contribution
+Feel free to add any tools that you've created for Pixel, I just ask that they're documented well and an usage wiki entry is added.
