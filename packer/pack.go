@@ -32,11 +32,13 @@ type Packer struct {
 	id          *pixelutils.IDGen
 }
 
+// NewPacker-time flags
 const (
 	AllowGrowth uint8 = 1 << iota // Should the packer space try to grow larger to fit oversized images
 	DebugDraw                     // Show the lines of the empty spaces when drawing the texture as an entire sprite
 )
 
+// Insert-time flags
 const (
 	InsertFlipped    uint8 = 1 << iota // Flip the sprite upside-down on insert
 	OptimizeOnInsert                   // When a new image is inserted, defragment the texture space
