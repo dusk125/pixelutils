@@ -11,9 +11,10 @@ Check out the [wiki](https://github.com/dusk125/pixelutils/wiki) to see how to u
     My attempt for an easy-to-use framerate limiter.
 * Sprite Loader:
     A simple sprite/picture data loader based on the Pixel example.
+* Voronoi Diagrams:
+    A pixel-compatible interface built on [Voronoi Diagrams](https://github.com/pzsz/voronoi).
 
 ## Planned
-* [Voronoi Diagrams](https://github.com/pzsz/voronoi)
 * [AStar Pathfinding](https://github.com/fzipp/astar)
 
 ## Contribution
