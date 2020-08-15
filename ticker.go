@@ -88,7 +88,37 @@ func (ticker *Ticker) Tick() (deltat, framerate float64) {
 	return ticker.deltat, ticker.framerate
 }
 
+// Reset the ticker
+func (ticker *Ticker) Reset() {
+	ticker.last = time.Now()
+}
+
 // Wait for the timer to complete its timeout
 func (ticker *Ticker) Wait() {
 	<-ticker.targetFPS.C
+}
+
+// Return the last framerate
+func (ticker Ticker) Framerate() float64 {
+	return ticker.framerate
+}
+
+// Return the last Deltat
+func (ticker Ticker) Deltat() float64 {
+	return ticker.deltat
+}
+
+// Return the average framerate
+func (ticker Ticker) AvgFramerate() float64 {
+	return ticker.avgFramerate
+}
+
+// Return the list of previous framerates
+func (ticker Ticker) PrevFramerates() []float32 {
+	return ticker.prevFPS
+}
+
+// Return the current target frametime
+func (ticker Ticker) TargetFrametime() time.Duration {
+	return ticker.targetFrametime
 }
