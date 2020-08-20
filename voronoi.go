@@ -7,14 +7,17 @@ import (
 
 // This is an pixel-conversion interface for https://github.com/pzsz/voronoi
 
+type voronoiMap map[interface{}]voronoi.Vertex
+type VoronoiCellMap map[interface{}]VoronoiCell
+
 type VoronoiCell struct {
-	ID        int
+	ID        interface{}
 	Site      pixel.Vec
 	Halfedges []pixel.Line
 }
 
 type Voronoi struct {
-	siteMap map[int]voronoi.Vertex
+	siteMap voronoiMap
 	sites   []voronoi.Vertex
 }
 
@@ -27,14 +30,14 @@ func convertVVertex(vertex voronoi.Vertex) pixel.Vec {
 func NewVoronoi() (v *Voronoi) {
 	v = &Voronoi{}
 
-	v.siteMap = make(map[int]voronoi.Vertex)
+	v.siteMap = make(voronoiMap)
 	v.sites = make([]voronoi.Vertex, 0)
 
 	return
 }
 
 // Inserts the vector into the voronoi list with the given identifier
-func (v *Voronoi) Insert(id int, pos pixel.Vec) {
+func (v *Voronoi) Insert(id interface{}, pos pixel.Vec) {
 	vert := voronoi.Vertex{
 		X: pos.X,
 		Y: pos.Y,
@@ -45,18 +48,19 @@ func (v *Voronoi) Insert(id int, pos pixel.Vec) {
 
 // Computes the voronoi diagram, constrained by the given bounding box, from the nodes inserted into the list
 //	If closeCells == true, edges from bounding box will be included in the diagram.
-func (v *Voronoi) Compute(boundingBox pixel.Rect, closeCells bool) map[int]VoronoiCell {
+func (v *Voronoi) Compute(boundingBox pixel.Rect, closeCells bool) VoronoiCellMap {
 	bb := voronoi.NewBBox(boundingBox.Min.X, boundingBox.Max.X, boundingBox.Min.Y, boundingBox.Max.Y)
 	diagram := voronoi.ComputeDiagram(v.sites, bb, closeCells)
 	return v.convert(diagram)
 }
 
 // helper function to conver the internal voronoi diagram to a pixel-compatible one
-func (v *Voronoi) convert(diagram *voronoi.Diagram) map[int]VoronoiCell {
-	cells := make(map[int]VoronoiCell)
+func (v *Voronoi) convert(diagram *voronoi.Diagram) VoronoiCellMap {
+	cells := make(VoronoiCellMap)
+	var ID interface{}
 
 	for _, vCell := range diagram.Cells {
-		ID := -1
+		ID = -1
 		for id, v := range v.siteMap {
 			if v.X == vCell.Site.X && v.Y == vCell.Site.Y {
 				ID = id
