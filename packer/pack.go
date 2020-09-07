@@ -46,25 +46,24 @@ const (
 
 // NewPacker creates and returns a new texture packer
 func NewPacker(width, height int, flags uint8) *Packer {
+	bounds := pixel.R(0, 0, float64(width), float64(height))
 	packer := &Packer{
-		bounds: pixel.R(0, 0, float64(width), float64(height)),
-		flags:  flags,
-		id:     pixelutils.NewIDGen(),
+		bounds:      bounds,
+		flags:       flags,
+		id:          pixelutils.NewIDGen(),
+		pic:         pixel.MakePictureData(bounds),
+		emptySpaces: make(spaceList, 1),
+		images:      make(map[int]pixel.Rect),
 	}
-
-	packer.pic = pixel.MakePictureData(packer.bounds)
 
 	if packer.hasFlag(DebugDraw) {
 		packer.im = imdraw.New(nil)
 		packer.im.Color = colornames.Red
-		packer.im.Push(packer.bounds.Min, packer.bounds.Max)
+		packer.im.Push(bounds.Min, bounds.Max)
 		packer.im.Rectangle(5)
 	}
 
-	packer.emptySpaces = make(spaceList, 1)
-	packer.emptySpaces[0] = packer.bounds
-
-	packer.images = make(map[int]pixel.Rect)
+	packer.emptySpaces[0] = bounds
 
 	return packer
 }
