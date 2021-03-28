@@ -215,8 +215,19 @@ func (packer *Packer) Insert(id int, image *pixel.Sprite) (err error) {
 
 // Inserts the image with the given id and additional insertion flags.
 func (packer *Packer) InsertV(id int, image *pixel.Sprite, flags uint8) (err error) {
-	bounds := image.Picture().Bounds()
 	pic := image.Picture().(*pixel.PictureData)
+
+	return packer.InsertPictureDataV(id, pic, flags)
+}
+
+// Inserts the PictureData with the given id into the texture space; default values.
+func (packer *Packer) InsertPictureData(id int, pic *pixel.PictureData) (err error) {
+	return packer.InsertPictureDataV(id, pic, 0)
+}
+
+// Inserts the picturedata with the given id and additional insertion flags.
+func (packer *Packer) InsertPictureDataV(id int, pic *pixel.PictureData, flags uint8) (err error) {
+	bounds := pic.Bounds()
 
 	if flags&OptimizeOnInsert != 0 {
 		packer.Optimize()
@@ -227,12 +238,12 @@ func (packer *Packer) InsertV(id int, image *pixel.Sprite, flags uint8) (err err
 		return err
 	}
 
-	for y := 0; y < int(pic.Bounds().H()); y++ {
-		for x := 0; x < int(pic.Bounds().W()); x++ {
+	for y := 0; y < int(bounds.H()); y++ {
+		for x := 0; x < int(bounds.W()); x++ {
 			i := packer.pic.Index(pixel.V(space.Min.X+float64(x), space.Min.Y+float64(y)))
 			var ii int
 			if flags&InsertFlipped != 0 {
-				ii = pic.Index(pixel.V(float64(x), (pic.Bounds().H()-1)-float64(y)))
+				ii = pic.Index(pixel.V(float64(x), (bounds.H()-1)-float64(y)))
 			} else {
 				ii = pic.Index(pixel.V(float64(x), float64(y)))
 			}
