@@ -50,7 +50,7 @@ func NewPacker(width, height int, flags uint8) *Packer {
 	packer := &Packer{
 		bounds:      bounds,
 		flags:       flags,
-		id:          pixelutils.NewIDGen(),
+		id:          &pixelutils.IDGen{},
 		pic:         pixel.MakePictureData(bounds),
 		emptySpaces: make(spaceList, 1),
 		images:      make(map[int]pixel.Rect),
