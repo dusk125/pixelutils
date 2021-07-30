@@ -23,6 +23,7 @@ func (packer AliasPacker) IdOf(alias interface{}) int {
 	return packer.alias[alias]
 }
 
+// Get the alias from the given internal integer ID
 func (packer AliasPacker) AliasOf(id int) interface{} {
 	for k, v := range packer.alias {
 		if v == id {
@@ -77,4 +78,8 @@ func (packer AliasPacker) Bounds() pixel.Rect {
 // Generates and returns a picture data representation of the internal texture
 func (packer *AliasPacker) Picture() pixel.Picture {
 	return packer.base.Picture()
+}
+
+func (packer *AliasPacker) Optimize() {
+	packer.base.Optimize()
 }
