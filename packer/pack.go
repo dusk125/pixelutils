@@ -219,7 +219,15 @@ func (pack *Packer) Save(filename string) (err error) {
 
 // Draws the given texture to the batch
 func (pack *Packer) Draw(id int, m pixel.Matrix) {
-	sprite := pixel.NewSprite(pack.pic, pack.rects[id])
+	var (
+		srect pixel.Rect
+	)
+	if rect, has := pack.rects[id]; has {
+		srect = rect
+	} else {
+		srect = pack.rects[0]
+	}
+	sprite := pixel.NewSprite(pack.pic, srect)
 	sprite.Draw(pack.batch, m)
 }
 
