@@ -1,7 +1,7 @@
 github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/dusk125/rectpack v1.1.0 h1:BrCW+X38AkngMKptaAZm7+rcurtyWTo66kLYn4w3XQ8=
-github.com/dusk125/rectpack v1.1.0/go.mod h1:3aXSYTPZuKVJOiWq1yPkerNIGVZ6XbSwEYxziqVeqXA=
+github.com/dusk125/rectpack v1.1.1 h1:iD3mIgNohj8+nPhkuqISmqgdvRE8g7AvrWr6fAP8OsY=
+github.com/dusk125/rectpack v1.1.1/go.mod h1:3aXSYTPZuKVJOiWq1yPkerNIGVZ6XbSwEYxziqVeqXA=
 github.com/faiface/glhf v0.0.0-20181018222622-82a6317ac380 h1:FvZ0mIGh6b3kOITxUnxS3tLZMh7yEoHo75v3/AgUqg0=
 github.com/faiface/glhf v0.0.0-20181018222622-82a6317ac380/go.mod h1:zqnPFFIuYFFxl7uH2gYByJwIVKG7fRqlqQCbzAnHs9g=
 github.com/faiface/mainthread v0.0.0-20171120011319-8b78f0a41ae3 h1:baVdMKlASEHrj19iqjARrPbaRisD7EuZEVJj6ZMLl1Q=

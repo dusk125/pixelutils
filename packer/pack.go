@@ -48,3 +48,11 @@ func (pack *Packer) DrawSub(id int, m pixel.Matrix) {
 	s := pixel.NewSprite(pack.pic, r)
 	s.Draw(pack.batch, m)
 }
+
+func (pack *Packer) Picture() pixel.Picture {
+	return pack.pic
+}
+
+func (pack *Packer) Bounds() pixel.Rect {
+	return pack.pic.Bounds()
+}
